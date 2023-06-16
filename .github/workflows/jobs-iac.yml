@@ -1,0 +1,70 @@
+name: "Infrastructure as Code"
+
+on:
+  workflow_call:
+    inputs:
+      var-file:
+        required: true
+        type: string
+      backend-config:
+        required: true
+        type: string
+      environment:
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  IaC:
+    name: "Infrastructure as Code"
+    runs-on: windows-latest
+    environment: ${{ inputs.environment }}
+    env:
+      TF_VAR_mssql_login: ${{ secrets.MSSQL_LOGIN }}
+      TF_VAR_mssql_login_pwd: ${{ secrets.MSSQL_LOGIN_PWD }}
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: deploy/iac
+
+    steps:
+      # OIDC Login to Azure Public Cloud with AzPowershell (enableAzPSSession true)
+      - name: OIDC Login
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          enable-AzPSSession: true
+
+      # Checkout the repository to the GitHub Actions runner
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      # Install the specified version of Terraform CLI and configure the Terraform CLI configuration file with a Terraform Cloud user API token
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.4.6
+          terraform_wrapper: false
+
+      # Initialize a new or existing Terraform working directory by creating initial files, loading any remote state, downloading modules, etc.
+      - name: Terraform Init
+        run: terraform init --backend-config=${{ inputs.backend-config }} --backend-config="subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}" --backend-config="tenant_id=${{ secrets.AZURE_TENANT_ID }}" --backend-config="client_id=${{ secrets.AZURE_CLIENT_ID }}"
+
+      # Checks that all Terraform configuration files adhere to a canonical format
+      - name: Terraform Format
+        run: terraform fmt -check
+
+      # Generates an execution plan for Terraform
+      - name: Terraform Plan
+        run: terraform plan -input=false -var-file="${{ inputs.var-file }}" -var="subscriptionId=${{ secrets.AZURE_SUBSCRIPTION_ID }}" -var="tenantId=${{ secrets.AZURE_TENANT_ID }}" -var="clientId=${{ secrets.AZURE_CLIENT_ID }}"
+
+        # On push to "develop", build or change infrastructure according to Terraform configuration files
+      - name: Terraform Apply
+        if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
+        run: terraform apply -auto-approve -input=false -var-file="${{ inputs.var-file }}" -var="subscriptionId=${{ secrets.AZURE_SUBSCRIPTION_ID }}" -var="tenantId=${{ secrets.AZURE_TENANT_ID }}" -var="clientId=${{ secrets.AZURE_CLIENT_ID }}"
+        

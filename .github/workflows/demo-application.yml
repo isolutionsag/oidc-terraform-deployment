@@ -1,0 +1,53 @@
+name: Demo Application
+
+on:
+  push:
+    branches: [ "develop" ]
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  create-terraform-backend-development:
+    if: github.ref == 'refs/heads/develop'
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/jobs-create-terraform-backend.yml
+    with:
+      backend-rg-name: dnug-d-rg-iac
+      backend-stacc-name: dnugdstoriac
+      backend-container-name: tfstate-dnug-demo
+      environment: "Development"
+    secrets: inherit
+  execute-iac-development:
+    if: github.ref == 'refs/heads/develop'
+    needs: [create-terraform-backend-development]
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/jobs-iac.yml
+    with:
+      var-file: vars/dev.tfvars
+      backend-config: backend/backend_config_dev.tfvars
+      environment: "Development"
+    secrets: inherit
+  build-dotnet:
+    uses: ./.github/workflows/jobs-build-dotnet.yml
+    with:
+      azure-webapp-package-path: DemoApplication/publish
+      artifact-name: DemoApplication
+      project-relative-path: DemoApplication/DemoApplication.csproj
+      backend-root-path: src
+  deploy-development:
+    if: github.ref == 'refs/heads/develop'
+    permissions:
+      contents: read
+      id-token: write
+    needs: [execute-iac-development, build-dotnet]
+    uses: ./.github/workflows/jobs-deploy-dotnet.yml
+    with:
+      artifact-name: DemoApplication
+      azure-webapp-name: dnug-d-appsrv-demo
+      environment: "Development"
+    secrets: inherit

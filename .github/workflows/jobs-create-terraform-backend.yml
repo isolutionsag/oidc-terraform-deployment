@@ -1,0 +1,58 @@
+on:
+  workflow_call:
+    inputs:
+      backend-rg-name:
+        required: true
+        type: string
+      backend-stacc-name:
+        required: true
+        type: string
+      backend-container-name:
+        required: true
+        type: string
+      environment:
+        required: true
+        type: string
+    secrets:
+      AZURE_SUBSCRIPTION_ID:
+        required: true
+      AZURE_TENANT_ID:
+        required: true
+      AZURE_CLIENT_ID:
+        required: true
+permissions:
+      id-token: write
+      contents: read
+jobs:
+  create-terraform-backend:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment}}
+    steps:
+      - name: Get Azure CLI
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          enable-AzPSSession: true
+      - name: Check if storage account exists
+        id: check-storage
+        run: |
+          az storage account check-name --name ${{ inputs.backend-stacc-name }} | jq '.nameAvailable'
+          echo "storage-available=$(az storage account check-name --name ${{ inputs.backend-stacc-name }} | jq '.nameAvailable')" >> $GITHUB_OUTPUT
+      - name: Create storage account
+        if: ${{ steps.check-storage.outputs.storage-available == 'true' }}
+        run: |
+          az storage account create --name ${{ inputs.backend-stacc-name }} --resource-group ${{ inputs.backend-rg-name }} --location switzerlandnorth --sku Standard_LRS
+      - name: Check if container exists
+        id: check-container
+        run: |
+          az storage container exists --name ${{ inputs.backend-container-name }} --account-name ${{ inputs.backend-stacc-name }} | jq '.exists'
+          echo "container-exists=$(az storage container exists --name ${{ inputs.backend-container-name }} --account-name ${{ inputs.backend-stacc-name }} | jq '.exists')" >> $GITHUB_OUTPUT
+      - name: Create container
+        if: ${{ steps.check-container.outputs.container-exists == 'false' }}
+        run: |
+          az storage container create --name ${{ inputs.backend-container-name }} --account-name ${{ inputs.backend-stacc-name }}
+      - name: Az Account Clear
+        run: az account clear
+  
